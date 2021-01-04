@@ -1,6 +1,6 @@
 import os
 
-from flask import Flask, render_template, request, flash, redirect, session, g
+from flask import Flask, render_template, request, flash, redirect, session, g, abort
 from flask_debugtoolbar import DebugToolbarExtension
 from sqlalchemy.exc import IntegrityError
 
@@ -199,6 +199,33 @@ def add_follow(follow_id):
     return redirect(f"/users")
 
 
+@app.route('/messages/<int:msg_id>/like', methods=['POST'])
+def add_like(msg_id):
+    """add a like functionality"""
+
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect('/')
+
+    liked = Message.query.get_or_404(msg_id)
+
+    # can't like your own message
+    if liked.user_id == g.user.id:
+        return abort(403)
+
+    likes = g.user.likes
+
+    # toggle like
+    if liked in likes:
+        g.user.likes = [like for like in likes if like != liked]
+    else:
+        g.user.likes.append(liked)
+
+    db.session.commit()
+
+    return redirect('/')
+
+
 @app.route('/users/stop-following/<int:follow_id>', methods=['POST'])
 def stop_following(follow_id):
     """Have currently-logged-in-user stop following this user."""
@@ -239,6 +266,19 @@ def profile():
 
         flash('Incorrect Password', 'danger')
     return render_template('users/edit.html', form=form, user_id=user.id)
+
+
+@app.route('/users/<int:user_id>/likes')
+def show_likes(user_id):
+    """show all of the user's liked warbles"""
+
+    if not g.user:
+        flash('Access unauthorized.', 'danger')
+        return redirect('/')
+
+    user = User.query.get_or_404(user_id)
+
+    return render_template('users/likes.html', user=user, likes=user.likes)
 
 
 @app.route('/users/delete', methods=["POST"])
@@ -328,7 +368,8 @@ def homepage():
                     .limit(100)
                     .all())
 
-        return render_template('home.html', messages=messages)
+        likes = [msg.id for msg in g.user.likes]
+        return render_template('home.html', messages=messages, likes=likes)
 
     else:
         return render_template('home-anon.html')
