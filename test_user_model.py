@@ -146,9 +146,16 @@ class UserModelTestCase(TestCase):
 
     def test_missing_password_signup(self):
         """password is meant to be not nullable"""
-       with self.assertRaises(ValueError) as context:
+        with self.assertRaises(ValueError) as context:
             User.signup("testtest", "email@email.com", "", None)
-        
+
         with self.assertRaises(ValueError) as context:
             User.signup("testtest", "email@email.com", None, None)
-        
+
+    def test_auth(self):
+        user = User.authenticate(self.user1.username, "testpass")
+        self.assertIsNotNone(user)
+        self.assertEqual(user.id, self.id1)
+
+    def test_bad_auth(self):
+        self.assertFalse(User.authenticate('abcdefg', 'badpassword'))
