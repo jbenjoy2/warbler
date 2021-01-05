@@ -5,6 +5,7 @@
 #    FLASK_ENV=production python -m unittest test_message_views.py
 
 
+from app import app, CURR_USER_KEY
 import os
 from unittest import TestCase
 
@@ -20,7 +21,6 @@ os.environ['DATABASE_URL'] = "postgresql:///warbler-test"
 
 # Now we can import app
 
-from app import app, CURR_USER_KEY
 
 # Create our tables (we do this here, so we only create the tables
 # once for all tests --- in each test, we'll delete the data
@@ -51,6 +51,9 @@ class MessageViewTestCase(TestCase):
 
         db.session.commit()
 
+    def tearDown(self):
+        db.session.rollback()
+
     def test_add_message(self):
         """Can use add a message?"""
 
@@ -71,3 +74,108 @@ class MessageViewTestCase(TestCase):
 
             msg = Message.query.one()
             self.assertEqual(msg.text, "Hello")
+
+    def test_delete_message(self):
+        m = Message(
+            id=2,
+            text="a test message",
+            user_id=self.testuser.id
+        )
+        db.session.add(m)
+        db.session.commit()
+
+        with self.client as c:
+            with c.session_transaction() as sess:
+                sess[CURR_USER_KEY] = self.testuser.id
+
+            resp = c.post("/messages/2/delete", follow_redirects=True)
+            self.assertEqual(resp.status_code, 200)
+
+            m = Message.query.get(2)
+            self.assertIsNone(m)
+
+    def test_show_message(self):
+        m = Message(
+            id=2,
+            text="a test message",
+            user_id=self.testuser.id
+        )
+        db.session.add(m)
+        db.session.commit()
+
+        with self.client as c:
+            with c.session_transaction() as sess:
+                sess[CURR_USER_KEY] = self.testuser.id
+
+            m = Message.query.get(2)
+
+            resp = c.get(f"/messages/{m.id}")
+            html = resp.get_data(as_text=True)
+
+            self.assertEqual(resp.status_code, 200)
+
+            self.assertIn(m.text, html)
+
+    def test_add_logged_out(self):
+        with self.client as c:
+            resp = c.post("/messages/new",
+                          data={"text": "Hello"}, follow_redirects=True)
+            html = resp.get_data(as_text=True)
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn('Access unauthorized', html)
+
+    def test_add_unauthorized(self):
+        with self.client as c:
+            with c.session_transaction() as sess:
+                sess[CURR_USER_KEY] = 123456778
+            resp = c.post("/messages/new",
+                          data={"text": "Hello"}, follow_redirects=True)
+            html = resp.get_data(as_text=True)
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn('Access unauthorized', html)
+
+    def test_delete_logged_out(self):
+        m = Message(
+            id=2,
+            text="a test message",
+            user_id=self.testuser.id
+        )
+        db.session.add(m)
+        db.session.commit()
+
+        with self.client as c:
+            resp = c.post('/messages/2/delete', follow_redirects=True)
+            html = resp.get_data(as_text=True)
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn('Access unauthorized', html)
+
+            m = Message.query.get(2)
+            self.assertIsNotNone(m)
+
+    def test_delete_unauthorized(self):
+        diff_user = User.signup(
+            username='wrong', email="wrong@test.com", password="wrongman", image_url=None)
+
+        diff_user.id = 12345
+
+        m = Message(
+            id=2,
+            text="a test message",
+            user_id=self.testuser.id
+        )
+
+        db.session.add_all([diff_user, m])
+        db.session.commit()
+
+        with self.client as c:
+            with c.session_transaction() as sess:
+                sess[CURR_USER_KEY] = 12345
+
+            resp = c.post('/messages/2/delete', follow_redirects=True)
+            html = resp.get_data(as_text=True)
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn('Access unauthorized', html)
